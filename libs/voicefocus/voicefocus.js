@@ -107,6 +107,10 @@ class VoiceFocus {
         var _a;
         return (_a = this.internal.voiceFocusNode) === null || _a === void 0 ? void 0 : _a.getModelMetrics();
     }
+    reset() {
+        var _a;
+        (_a = this.internal.voiceFocusNode) === null || _a === void 0 ? void 0 : _a.reset();
+    }
     enable() {
         var _a;
         (_a = this.internal.voiceFocusNode) === null || _a === void 0 ? void 0 : _a.enable();
@@ -325,18 +329,55 @@ class VoiceFocus {
             .addModule(url)
             .then(() => new (this.nodeConstructor)(context, Object.assign(Object.assign({}, this.nodeOptions), { processorOptions })));
     }
-    applyToStream(stream, context, options) {
+    applyToStream(stream, context, options, useExistingNode = false) {
+        var _a, _b, _c, _d;
         return __awaiter(this, void 0, void 0, function* () {
             if (this.internal.isDestroyed) {
                 throw new Error("Unable to apply stream because VoiceFocus worker has been destroyed");
             }
+            if (context.state === 'closed') {
+                throw new Error("Cannot apply stream to a closed AudioContext");
+            }
+            let voiceFocusNode;
+            if (useExistingNode) {
+                if (!this.internal.voiceFocusNode) {
+                    throw new Error("Cannot reuse node: no existing VoiceFocus node found. Call applyToStream without useExistingNode first.");
+                }
+                if (!this.internal.voiceFocusNode.isEnabled()) {
+                    throw new Error("Cannot reuse node: existing VoiceFocus node is disabled.");
+                }
+                if (this.internal.audioContext && this.internal.audioContext !== context) {
+                    (_a = this.logger) === null || _a === void 0 ? void 0 : _a.warn("AudioContext mismatch: using different context than previous call");
+                }
+                (_b = this.logger) === null || _b === void 0 ? void 0 : _b.info("Reusing existing VoiceFocus node");
+                voiceFocusNode = this.internal.voiceFocusNode;
+                if (this.internal.sourceNode) {
+                    try {
+                        this.internal.sourceNode.disconnect();
+                    }
+                    catch (e) {
+                        (_c = this.logger) === null || _c === void 0 ? void 0 : _c.debug("Failed to disconnect old source node:", e);
+                    }
+                }
+                if (this.internal.destinationNode) {
+                    try {
+                        voiceFocusNode.disconnect(this.internal.destinationNode);
+                    }
+                    catch (e) {
+                        (_d = this.logger) === null || _d === void 0 ? void 0 : _d.debug("Failed to disconnect old destination node:", e);
+                    }
+                }
+            }
+            else {
+                voiceFocusNode = yield this.createNode(context, options);
+            }
             const source = context.createMediaStreamSource(stream);
-            const node = yield this.applyToSourceNode(source, context, options);
             const destination = context.createMediaStreamDestination();
-            node.connect(destination);
-            this.internal = Object.assign(Object.assign({}, this.internal), { voiceFocusNode: node, sourceNode: source, destinationNode: destination, audioContext: context });
+            source.connect(voiceFocusNode);
+            voiceFocusNode.connect(destination);
+            this.internal = Object.assign(Object.assign({}, this.internal), { voiceFocusNode, sourceNode: source, destinationNode: destination, audioContext: context });
             return {
-                node,
+                node: voiceFocusNode,
                 source,
                 destination,
                 stream: destination.stream,
